@@ -18,4 +18,17 @@ if [ "${OPTIMIZE:-false}" = "true" ]; then
     php artisan view:cache
 fi
 
-exec "$@"
+APP_ROLE="${1:-web}"
+
+case "${APP_ROLE}" in
+    web)
+        exec /usr/bin/supervisord -c /etc/supervisord.conf
+        ;;
+    worker)
+        exec php artisan queue:work --sleep=3 --tries=3 --max-time=3600
+        ;;
+    *)
+        echo "Unknown APP_ROLE: ${APP_ROLE}. Must be 'web' or 'worker'."
+        exit 1
+        ;;
+esac

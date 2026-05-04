@@ -7,9 +7,10 @@ RUN dnf install -y epel-release \
     && dnf install -y https://rpms.remirepo.net/enterprise/remi-release-9.rpm \
     && dnf module reset php -y \
     && dnf module enable php:remi-8.5 -y \
-    && dnf install -y \
+    && dnf install -y --allowerasing \
         php-cli \
         php-common \
+        php-fpm \
         php-bcmath \
         php-curl \
         php-gd \
@@ -24,10 +25,12 @@ RUN dnf install -y epel-release \
         php-xml \
         php-zip \
         php-pecl-redis5 \
+        nginx \
+        supervisor \
+        curl \
     && dnf clean all \
     && rm -rf /var/cache/dnf \
-    && groupadd -r nginx \
-    && useradd -r -g nginx -d /var/cache/nginx -s /sbin/nologin nginx
+    && id nginx >/dev/null 2>&1 || (groupadd -r nginx && useradd -r -g nginx -d /var/cache/nginx -s /sbin/nologin nginx)
 
 # ============================================
 # Stage: Build (PHP + Node.js for asset compilation)
@@ -36,7 +39,7 @@ FROM php-base AS build
 
 RUN dnf install -y dnf-utils \
     && dnf module reset nodejs -y \
-    && dnf module enable nodejs:22 -y \
+    && dnf module enable nodejs:24 -y \
     && dnf install -y nodejs npm \
     && dnf clean all \
     && rm -rf /var/cache/dnf
@@ -58,13 +61,9 @@ RUN composer dump-autoload --optimize \
 RUN npm run build
 
 # ============================================
-# Stage: web (nginx + php-fpm via supervisor)
+# Stage: app (single image for web and worker)
 # ============================================
-FROM php-base AS web
-
-RUN dnf install -y php-fpm nginx supervisor \
-    && dnf clean all \
-    && rm -rf /var/cache/dnf
+FROM php-base AS app
 
 COPY docker/php/www.conf /etc/php-fpm.d/www.conf
 COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
@@ -97,25 +96,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost/ || exit 1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
-
-# ============================================
-# Stage: worker (queue:work)
-# ============================================
-FROM php-base AS worker
-
-WORKDIR /app
-
-COPY --from=build /app /app
-
-RUN mkdir -p /app/storage/logs \
-    /app/storage/framework/cache \
-    /app/storage/framework/sessions \
-    /app/storage/framework/views \
-    /app/bootstrap/cache \
-    && touch /app/database/database.sqlite \
-    && chown -R nginx:nginx /app/storage /app/bootstrap/cache /app/database/database.sqlite \
-    && chmod -R 775 /app/storage /app/bootstrap/cache
-
-ENTRYPOINT ["php", "artisan"]
-CMD ["queue:work", "--sleep=3", "--tries=3", "--max-time=3600"]
+CMD ["web"]

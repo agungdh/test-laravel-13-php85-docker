@@ -1,0 +1,57 @@
+name: CI Check
+
+on:
+    push:
+        branches:
+            - main
+            - master
+    pull_request:
+        branches:
+            - main
+            - master
+    workflow_dispatch:
+
+jobs:
+    ci-check:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.5'
+                  extensions: sqlite3, pdo_sqlite
+                  coverage: none
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '24'
+                  cache: 'npm'
+
+            - name: Install Composer dependencies
+              run: composer install --prefer-dist --no-progress
+
+            - name: Install Node dependencies
+              run: npm ci
+
+            - name: Prepare Laravel
+              run: |
+                  cp .env.example .env
+                  php artisan key:generate
+                  touch database/database.sqlite
+
+            - name: Run ESLint
+              run: npm run lint:check
+
+            - name: Run Prettier check
+              run: npm run format:check
+
+            - name: Run Svelte type check
+              run: npm run types:check
+
+            - name: Run Pint check
+              run: vendor/bin/pint --test
